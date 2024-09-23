@@ -1,106 +1,150 @@
 ﻿#include <iostream>
+#include <iomanip>
+#include <string>
+#include <sstream>
+#include <vector>
 #include <cuda_runtime.h>
 #include <curand_kernel.h>
 #include <secp256k1.h>
-#include <string>
-#include <sstream>
-#include <iomanip>
-#include <cstring>
-#include <openssl/sha.h>
-#include <openssl/ripemd.h>
 #include <openssl/evp.h>
-#include <cstring>
+#include <openssl/kdf.h>
 
 // Helper function to convert binary data to hexadecimal string
 std::string toHex(const uint8_t* data, size_t length) {
-    std::ostringstream oss;
+    std::stringstream ss;
+    ss << std::hex << std::setfill('0');
     for (size_t i = 0; i < length; ++i) {
-        oss << std::hex << std::setw(2) << std::setfill('0') << (int)data[i];
+        ss << std::setw(2) << static_cast<int>(data[i]);
     }
-    return oss.str();
+    return ss.str();
 }
 
-// Kernel function to generate random entropy (32 bytes) in parallel on GPU
-__global__ void generateEntropy(uint8_t* d_entropy, int numWallets) {
+// CUDA kernel for generating random private keys
+__global__ void generatePrivateKeys(uint8_t* d_privateKeys, int numWallets) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < numWallets) {
         curandState state;
         curand_init(clock64(), idx, 0, &state);
         for (int i = 0; i < 32; ++i) {
-            d_entropy[idx * 32 + i] = curand(&state) % 256;
+            d_privateKeys[idx * 32 + i] = curand(&state) % 256;
         }
     }
 }
 
-// Function to perform Keccak-256 hash (simplified for this example)
-void keccak256(const uint8_t* input, size_t length, uint8_t* output) {
-    // Note: This is a placeholder. In a real implementation, you should use a proper Keccak-256 function.
-    SHA256(input, length, output);
+// Class to manage OpenSSL EVP context
+class KeccakHasher {
+private:
+    EVP_MD_CTX* mdctx;
+    const EVP_MD* md;
+
+public:
+    KeccakHasher() : mdctx(EVP_MD_CTX_new()), md(EVP_sha3_256()) {
+        if (!mdctx) throw std::runtime_error("Failed to create EVP_MD_CTX");
+    }
+
+    ~KeccakHasher() {
+        EVP_MD_CTX_free(mdctx);
+    }
+
+    void hash(const unsigned char* input, size_t length, unsigned char* output) {
+        EVP_DigestInit_ex(mdctx, md, nullptr);
+        EVP_DigestUpdate(mdctx, input, length);
+        unsigned int digest_length;
+        EVP_DigestFinal_ex(mdctx, output, &digest_length);
+    }
+};
+
+bool addressMatchesTarget(const std::string& address,
+    const std::vector<std::string>& prefixes,
+    const std::vector<std::string>& suffixes) {
+    for (const auto& prefix : prefixes) {
+        if (address.substr(2, prefix.length()) == prefix) {
+            // If prefix matches, check for suffix match
+            for (const auto& suffix : suffixes) {
+                if (address.substr(address.length() - suffix.length()) == suffix) {
+                    return true; // Both prefix and suffix match
+                }
+            }
+        }
+    }
+    return false; // No combination of prefix and suffix matched
 }
 
 int main() {
-    const int numWallets = 10240 * 256;  // Number of wallets to generate
-    const char targetPrefix[] = "bad";  // Target address prefix
-    const char targetSuffix[] = "c0de"; // Target address suffix
+    const int batchSize = 1024 * 256;  // Number of wallets to generate per batch
+    std::vector<std::string> targetPrefixes = { "bd", "da", "fe"};  // Target address prefixes
+    std::vector<std::string> targetSuffixes = { "c0de", "cafe", "face" }; // Target address suffixes
 
-    // Allocate memory on GPU for entropy
-    uint8_t* d_entropy;
-    cudaMalloc(&d_entropy, numWallets * 32 * sizeof(uint8_t));
-
-    // Launch kernel to generate entropy in parallel on GPU
-    int threadsPerBlock = 256;
-    int blocksPerGrid = (numWallets + threadsPerBlock - 1) / threadsPerBlock;
-    generateEntropy << <blocksPerGrid, threadsPerBlock >> > (d_entropy, numWallets);
-
-    // Allocate host memory for entropy
-    uint8_t* h_entropy = new uint8_t[numWallets * 32];
-
-    // Copy entropy from GPU to host
-    cudaMemcpy(h_entropy, d_entropy, numWallets * 32 * sizeof(uint8_t), cudaMemcpyDeviceToHost);
+    // Initialize CUDA
+    uint8_t* d_privateKeys;
+    cudaMalloc(&d_privateKeys, batchSize * 32 * sizeof(uint8_t));
 
     // Initialize secp256k1 context
     secp256k1_context* ctx = secp256k1_context_create(SECP256K1_CONTEXT_SIGN);
 
-    // Iterate through each wallet
-    for (int i = 0; i < numWallets; ++i) {
-        // Use the entropy as the private key
-        uint8_t privkey[32];
-        memcpy(privkey, &h_entropy[i * 32], 32);
+    // Initialize Keccak hasher
+    KeccakHasher keccakHasher;
 
-        secp256k1_pubkey pubkey;
-        if (!secp256k1_ec_pubkey_create(ctx, &pubkey, privkey)) {
-            std::cerr << "Invalid private key at wallet index " << i << std::endl;
-            continue;
-        }
+    uint64_t totalAddressesGenerated = 0;
+    bool targetFound = false;
+    std::string matchedAddress;
+    std::string matchedPrivateKey;
 
-        // Serialize the public key
-        uint8_t pubkey_output[65];
-        size_t pubkey_output_len = sizeof(pubkey_output);
-        secp256k1_ec_pubkey_serialize(ctx, pubkey_output, &pubkey_output_len, &pubkey, SECP256K1_EC_UNCOMPRESSED);
+    while (!targetFound) {
+        // Generate batch of private keys
+        generatePrivateKeys << <(batchSize + 255) / 256, 256 >> > (d_privateKeys, batchSize);
 
-        // Hash the public key to derive the Ethereum address
-        uint8_t hash[32];
-        keccak256(pubkey_output + 1, 64, hash);
+        // Copy private keys back to host
+        std::vector<uint8_t> h_privateKeys(batchSize * 32);
+        cudaMemcpy(h_privateKeys.data(), d_privateKeys, batchSize * 32 * sizeof(uint8_t), cudaMemcpyDeviceToHost);
 
-        // Take the last 20 bytes as the address
-        uint8_t address[20];
-        memcpy(address, hash + 12, 20);
+        // Process batch
+        for (int i = 0; i < batchSize; ++i) {
+            uint8_t* privateKey = &h_privateKeys[i * 32];
 
-        // Convert the address to a hexadecimal string
-        std::string hexAddress = toHex(address, 20);
+            // Generate public key
+            secp256k1_pubkey pubkey;
+            if (!secp256k1_ec_pubkey_create(ctx, &pubkey, privateKey)) {
+                continue;
+            }
 
-        // Check if the address matches the target prefix/suffix
-        if (hexAddress.rfind(targetPrefix, 0) == 0 && hexAddress.substr(hexAddress.size() - strlen(targetSuffix)) == targetSuffix) {
-            std::cout << "Matching address found: 0x" << hexAddress << std::endl;
-            std::cout << "Private key: " << toHex(privkey, 32) << std::endl;
+            // Serialize public key
+            uint8_t serializedPubkey[65];
+            size_t pubkeyLen = sizeof(serializedPubkey);
+            secp256k1_ec_pubkey_serialize(ctx, serializedPubkey, &pubkeyLen, &pubkey, SECP256K1_EC_UNCOMPRESSED);
+
+            // Hash public key
+            uint8_t hash[32];
+            keccakHasher.hash(serializedPubkey + 1, 64, hash);
+
+            // Create Ethereum address (last 20 bytes of the hash)
+            std::string address = "0x" + toHex(hash + 12, 20);
+
+            totalAddressesGenerated++;
+
+            // Check if address matches target
+            if (addressMatchesTarget(address, targetPrefixes, targetSuffixes)) {
+                targetFound = true;
+                matchedAddress = address;
+                matchedPrivateKey = toHex(privateKey, 32);
+                break;
+            }
+
+            // Print progress every million addresses
+            if (totalAddressesGenerated % 1000000 == 0) {
+                std::cout << "Generated " << totalAddressesGenerated << " addresses so far..." << std::endl;
+            }
         }
     }
 
+    // Print result
+    std::cout << "Match found after generating " << totalAddressesGenerated << " addresses!" << std::endl;
+    std::cout << "Matching address: " << matchedAddress << std::endl;
+    std::cout << "Private key: " << matchedPrivateKey << std::endl;
+
     // Cleanup
     secp256k1_context_destroy(ctx);
-    cudaFree(d_entropy);
-    delete[] h_entropy;
+    cudaFree(d_privateKeys);
 
-    std::cout << "Process completed." << std::endl;
     return 0;
 }
