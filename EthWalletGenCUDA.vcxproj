@@ -41,9 +41,12 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
+    <IncludePath>C:\Users\andre\Documents\Git\EthWalletGenCUDA\XKCP-master\Standalone\CompactFIPS202\C;C:\Users\andre\Documents\Git\EthWalletGenCUDA\XKCP-master\lib\high\Keccak;C:\Users\andre\Documents\Git\EthWalletGenCUDA\XKCP-master\lib;C:\Users\andre\Documents\Git\EthWalletGenCUDA\XKCP-master\lib\high\Keccak\FIPS202;C:\Users\andre\Documents\Git\EthWalletGenCUDA\secp256k1-master\include;C:\Program Files\OpenSSL-Win64\include;C:\Users\andre\Documents\Git\EthWalletGenCUDA\secp256k1-master\build\src\Release</IncludePath>
+    <LibraryPath>C:\Users\andre\Documents\Git\EthWalletGenCUDA\XKCP-master\lib\high\Keccak;C:\Users\andre\Documents\Git\EthWalletGenCUDA\XKCP-master\lib\;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <IncludePath>D:\Program Files\Github\EthWalletGen\secp256k1\include;C:\Program Files\OpenSSL-Win64\include;$(IncludePath)</IncludePath>
+    <IncludePath>C:\Users\andre\Documents\Git\EthWalletGenCUDA\XKCP-master\Standalone\CompactFIPS202\C;C:\Users\andre\Documents\Git\EthWalletGenCUDA\XKCP-master\lib\high\Keccak;C:\Users\andre\Documents\Git\EthWalletGenCUDA\XKCP-master\lib;C:\Users\andre\Documents\Git\EthWalletGenCUDA\XKCP-master\lib\high\Keccak\FIPS202;C:\Users\andre\Documents\Git\EthWalletGenCUDA\secp256k1-master\include;C:\Program Files\OpenSSL-Win64\include;C:\Users\andre\Documents\Git\EthWalletGenCUDA\secp256k1-master\build\src\Release</IncludePath>
+    <LibraryPath>C:\Users\andre\Documents\Git\EthWalletGenCUDA\XKCP-master\lib\high\Keccak;C:\Users\andre\Documents\Git\EthWalletGenCUDA\XKCP-master\lib\;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
@@ -59,7 +62,9 @@ curand.lib;
 libsecp256k1.lib;
 libssl.lib;
 libcrypto.lib</AdditionalDependencies>
-      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(CudaToolkitLibDir);D:\Program Files\Github\EthWalletGen\secp256k1\build\src\Release;C:\Program Files\OpenSSL-Win64\lib\VC\x64\MD</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>C:\Users\andre\Documents\Git\EthWalletGenCUDA\XKCP-master\Standalone\CompactFIPS202\C;%(AdditionalLibraryDirectories);$(CudaToolkitLibDir);C:\Users\andre\Documents\Git\EthWalletGenCUDA\secp256k1-master\build\src\Release;C:\Program Files\OpenSSL-Win64\lib\VC\x64\MD</AdditionalLibraryDirectories>
+      <IgnoreSpecificDefaultLibraries>LIBCMT </IgnoreSpecificDefaultLibraries>
+      <LinkTimeCodeGeneration>Default</LinkTimeCodeGeneration>
     </Link>
     <CudaCompile>
       <TargetMachinePlatform>64</TargetMachinePlatform>
@@ -83,7 +88,9 @@ curand.lib;
 libsecp256k1.lib;
 libssl.lib;
 libcrypto.lib</AdditionalDependencies>
-      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(CudaToolkitLibDir);D:\Program Files\Github\EthWalletGen\secp256k1\build\src\Release;C:\Program Files\OpenSSL-Win64\lib\VC\x64\MD</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>C:\Users\andre\Documents\Git\EthWalletGenCUDA\XKCP-master\Standalone\CompactFIPS202\C;%(AdditionalLibraryDirectories);$(CudaToolkitLibDir);C:\Users\andre\Documents\Git\EthWalletGenCUDA\secp256k1-master\build\src\Release;C:\Program Files\OpenSSL-Win64\lib\VC\x64\MD</AdditionalLibraryDirectories>
+      <IgnoreSpecificDefaultLibraries>LIBCMT </IgnoreSpecificDefaultLibraries>
+      <LinkTimeCodeGeneration>Default</LinkTimeCodeGeneration>
     </Link>
     <CudaCompile>
       <TargetMachinePlatform>64</TargetMachinePlatform>
