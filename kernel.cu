@@ -100,8 +100,6 @@ __global__ void generatePrivateKeys(uint8_t* d_privateKeys, unsigned int numKeys
 
 // Mutex for synchronizing access to shared data
 std::mutex dataMutex;
-
-// Host function to process private keys
 bool processPrivateKeys(const uint8_t* privateKeys, unsigned int numKeys, const std::string& targetPrefix, const std::string& targetSuffix,
     uint8_t* matchedPrivateKey, uint8_t* matchedAddress, std::atomic<bool>& found) {
     // Create a secp256k1 context
@@ -145,7 +143,7 @@ bool processPrivateKeys(const uint8_t* privateKeys, unsigned int numKeys, const 
         std::string lowerTargetSuffix = targetSuffix;
         std::transform(lowerTargetSuffix.begin(), lowerTargetSuffix.end(), lowerTargetSuffix.begin(), ::tolower);
 
-        // Check if address starts or ends with the target substring
+        // Check if address starts AND ends with the target substring
         bool prefixMatch = false;
         bool suffixMatch = false;
 
@@ -156,7 +154,8 @@ bool processPrivateKeys(const uint8_t* privateKeys, unsigned int numKeys, const 
             suffixMatch = lowerAddressHex.compare(lowerAddressHex.length() - lowerTargetSuffix.length(), lowerTargetSuffix.length(), lowerTargetSuffix) == 0;
         }
 
-        if (prefixMatch || suffixMatch) {
+        // Require both prefix and suffix to match
+        if (prefixMatch && suffixMatch) {
             // Lock the mutex before writing shared data
             std::lock_guard<std::mutex> lock(dataMutex);
 
@@ -174,7 +173,7 @@ bool processPrivateKeys(const uint8_t* privateKeys, unsigned int numKeys, const 
 }
 
 int main() {
-    const std::string targetPrefix = "0000"; // Target prefix to match
+    const std::string targetPrefix = "c0de"; // Target prefix to match
     const std::string targetSuffix = "c0de"; // Target suffix to match
 
     // GPU configurations
@@ -191,23 +190,25 @@ int main() {
     uint8_t matchedAddress[20];
     std::atomic<bool> found(false);
     std::atomic<unsigned long long> totalAddressesGenerated(0);
+    unsigned int matchesFound = 0; // Track number of matches
 
     auto startTime = std::chrono::high_resolution_clock::now();
 
     // CPU thread for monitoring progress
     std::thread progressThread([&totalAddressesGenerated, &found, startTime]() {
-        while (!found.load()) {
+        while (true) { // Changed to infinite loop since we don’t stop
             std::this_thread::sleep_for(std::chrono::seconds(10));
             auto currentTime = std::chrono::high_resolution_clock::now();
             auto duration = std::chrono::duration_cast<std::chrono::seconds>(currentTime - startTime);
             unsigned long long current = totalAddressesGenerated.load();
-            double rate = static_cast<double>(current) / duration.count();
+            double rate = duration.count() > 0 ? static_cast<double>(current) / duration.count() : 0;
             std::cout << "Generated " << current << " addresses in " << duration.count()
                 << " seconds (Rate: " << std::fixed << std::setprecision(2) << rate << " addr/s)" << std::endl;
         }
         });
 
-    while (!found.load()) {
+    // Main loop (no break, continues indefinitely)
+    while (true) {
         // Step 1: Generate private keys on GPU
         generatePrivateKeys << <numBlocks, blockSize >> > (d_privateKeys, numKeys);
         cudaDeviceSynchronize(); // Ensure kernel execution is complete
@@ -221,27 +222,33 @@ int main() {
             std::string addressHex = toHex(matchedAddress, 20);
             std::string checksumAddress = toChecksumAddress(addressHex);
 
-            std::cout << "Match found!" << std::endl;
+            std::cout << "Match found #" << ++matchesFound << "!" << std::endl;
             std::cout << "Address: " << checksumAddress << std::endl;
             std::cout << "Private Key: 0x" << toHex(matchedPrivateKey, 32) << std::endl;
 
-            // Optionally, generate mnemonic from private key here
-            // ...
+            // Pause and wait for user input
+            std::cout << "Press 'c' to continue searching, 'q' to quit: ";
+            char choice;
+            std::cin >> choice;
+            if (choice == 'q' || choice == 'Q') {
+                break; // Exit if user chooses to quit
+            }
 
-            break; // Exit the loop after finding a match
+            // Reset found flag to continue searching
+            found.store(false, std::memory_order_relaxed);
         }
 
         totalAddressesGenerated += numKeys;
     }
 
-    progressThread.join();
-
+    // Cleanup
+    progressThread.detach(); // Detach since we may exit before it finishes
     auto endTime = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::seconds>(endTime - startTime);
     std::cout << "Total time: " << duration.count() << " seconds" << std::endl;
     std::cout << "Total addresses generated: " << totalAddressesGenerated << std::endl;
+    std::cout << "Total matches found: " << matchesFound << std::endl;
 
-    // Cleanup
     cudaFree(d_privateKeys);
     delete[] h_privateKeys;
 
